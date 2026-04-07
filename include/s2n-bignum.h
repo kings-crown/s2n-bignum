@@ -990,6 +990,14 @@ extern void mldsa_intt(int32_t a[S2N_BIGNUM_STATIC 256], const int32_t zetas[S2N
 // Input a[256], zetas[624] (signed 32-bit words); output a[256] (signed 32-bit words)
 extern void mldsa_ntt(int32_t a[S2N_BIGNUM_STATIC 256], const int32_t zetas[S2N_BIGNUM_STATIC 624]);
 
+// Pointwise multiplication of polynomials in NTT domain (Montgomery form) for ML-DSA
+// Inputs a[256], b[256] (signed 32-bit words); output r[256] (signed 32-bit words)
+extern void mldsa_pointwise(int32_t r[S2N_BIGNUM_STATIC 256], const int32_t a[S2N_BIGNUM_STATIC 256], const int32_t b[S2N_BIGNUM_STATIC 256]);
+
+// Pointwise multiplication of polynomials in NTT domain (Montgomery form) for ML-DSA, x86 version
+// Inputs a[256], b[256], qdata[16] (signed 32-bit words); output c[256] (signed 32-bit words)
+extern void mldsa_pointwise_x86(int32_t c[S2N_BIGNUM_STATIC 256], const int32_t a[S2N_BIGNUM_STATIC 256], const int32_t b[S2N_BIGNUM_STATIC 256], const int32_t qdata[S2N_BIGNUM_STATIC 16]);
+
 // Canonical reduction of polynomial coefficients for ML-DSA
 // Input a[256] (signed 32-bit words); output a[256] (signed 32-bit words)
 extern void mldsa_reduce(int32_t a[S2N_BIGNUM_STATIC 256]);
@@ -1153,7 +1161,11 @@ extern void sha3_keccak2_f1600_alt(uint64_t a[S2N_BIGNUM_STATIC 50],const uint64
 // Batched 4-way Keccak-f1600 permutation for SHA3
 // Inputs a[100], rc[24]; output a[100]
 extern void sha3_keccak4_f1600(uint64_t a[S2N_BIGNUM_STATIC 100],const uint64_t rc[S2N_BIGNUM_STATIC 24]);
+#ifdef __x86_64__
+extern void sha3_keccak4_f1600_alt(uint64_t a[S2N_BIGNUM_STATIC 100],const uint64_t rc[S2N_BIGNUM_STATIC 24],const uint64_t rho8[S2N_BIGNUM_STATIC 4],const uint64_t rho56[S2N_BIGNUM_STATIC 4]);
+#else
 extern void sha3_keccak4_f1600_alt(uint64_t a[S2N_BIGNUM_STATIC 100],const uint64_t rc[S2N_BIGNUM_STATIC 24]);
+#endif
 extern void sha3_keccak4_f1600_alt2(uint64_t a[S2N_BIGNUM_STATIC 100],const uint64_t rc[S2N_BIGNUM_STATIC 24]);
 
 // Point addition on CC curve SM2 in Montgomery-Jacobian coordinates

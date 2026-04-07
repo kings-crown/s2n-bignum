@@ -126,6 +126,10 @@ let arm_adv_simd_expand_imm = new_definition
       SOME(word_duplicate (word_join (word 0:byte) abcdefgh:int16))
     else if cmode = word 0b1010 \/ cmode = word 0b1011 then
        SOME(word_duplicate (word_join abcdefgh (word 0:byte):int16))
+    else if cmode = word 0b0100 then
+      SOME(word_duplicate (word_join (word_zx abcdefgh:int16) (word 0:int16):int32))
+    else if cmode = word 0b1101 then
+      SOME(word_duplicate (word_join (word_zx abcdefgh:int16) (word 65535:int16):int32))
     else // Other cases are uncovered.
       NONE`;;
 
@@ -451,6 +455,14 @@ let decode = new_definition `!w:int32. decode w =
       SOME ((if u then arm_SUB_VEC else arm_ADD_VEC)
             (QREG' Rd) (QREG' Rn) (QREG' Rm) esize datasize)
 
+  | [0:1; q; 0b101110:6; size:2; 1:1; Rm:5; 0b010001:6; Rn:5; Rd:5] ->
+    // USHL (vector, per-element variable shift)
+    if size = (word 0b11:(2)word) /\ ~q then NONE
+    else
+      let esize = 8 * (2 EXP (val size)) in
+      let datasize = if q then 128 else 64 in
+      SOME (arm_USHL_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) esize datasize)
+
   | [0:1; q; 0b001110001:9; Rm:5; 0b000111:6; Rn:5; Rd:5] ->
     // AND
     SOME (arm_AND_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) (if q then 128 else 64))
@@ -459,12 +471,33 @@ let decode = new_definition `!w:int32. decode w =
     // BIC (vector)
     SOME (arm_BIC_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) (if q then 128 else 64))
 
+  | [0:1; q; 0b001110:6; size:2; 1:1; Rm:5; 0b001101:6; Rn:5; Rd:5] ->
+    // CMGT (vector, register, signed)
+    if size = word 0b11 /\ ~q then NONE else
+    let esize = 8 * 2 EXP val size in
+    let datasize = if q then 128 else 64 in
+    SOME (arm_CMGT_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) esize datasize)
+
   | [0:1; q; 0b101110:6; size:2; 1:1; Rm:5; 0b001101:6; Rn:5; Rd:5] ->
-    // CMHI (vector)
+    // CMHI (vector, register, unsigned)
     if size = word 0b11 /\ ~q then NONE else
     let esize = 8 * 2 EXP val size in
     let datasize = if q then 128 else 64 in
     SOME (arm_CMHI_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) esize datasize)
+
+  | [0:1; q; 0b001110:6; size:2; 1:1; Rm:5; 0b001111:6; Rn:5; Rd:5] ->
+    // CMGE (register)
+    if size = word 0b11 /\ ~q then NONE else
+    let esize = 8 * 2 EXP val size in
+    let datasize = if q then 128 else 64 in
+    SOME (arm_CMGE_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) esize datasize)
+
+  | [0:1; q; 0b101110:6; size:2; 1:1; Rm:5; 0b011011:6; Rn:5; Rd:5] ->
+    // UMIN (vector)
+    if size = word 0b11 then NONE else
+    let esize = 8 * 2 EXP val size in
+    let datasize = if q then 128 else 64 in
+    SOME (arm_UMIN_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) esize datasize)
 
   | [0:1; q; 0b101110001:9; Rm:5; 0b000111:6; Rn:5; Rd:5] ->
     // EOR
@@ -486,6 +519,13 @@ let decode = new_definition `!w:int32. decode w =
     let datasize = if q then 128 else 64 in
     SOME (arm_CNT (QREG' Rd) (QREG' Rn) datasize)
 
+  | [0:1; q; 0b101110:6; size:2; 0b100000100110:12; Rn:5; Rd:5] ->
+    // CMLE (vector, zero) - signed compare <= 0
+    if size = word 0b11 /\ ~q then NONE else
+    let esize = 8 * 2 EXP val size in
+    let datasize = if q then 128 else 64 in
+    SOME (arm_CMLE_VEC_ZERO (QREG' Rd) (QREG' Rn) esize datasize)
+
   | [0:1; q; 0b001110000:9; imm5:5; 0b000011:6; Rn:5; Rd:5] ->
     // DUP (general)
     let size = word_ctz imm5 in
@@ -505,7 +545,7 @@ let decode = new_definition `!w:int32. decode w =
     else NONE
 
   | [0:1; q; 1:1; 0b011110:6; immh:4; abc:3; cmode:4; 0b01:2; defgh:5; Rd:5] ->
-    // MOVI, USHR (Vector), USRA (Vector), SLI (Vector), SRI (vector)
+    // MOVI (op=1), USHR (Vector), USRA (Vector), SLI (Vector), SRI (vector)
     if val immh = 0 then
       // MOVI, 128-bit only
       if cmode = word 0b1110 /\ q then
@@ -625,6 +665,14 @@ let decode = new_definition `!w:int32. decode w =
       let esize = 8 * (2 EXP (val size)) in
       let datasize = if q then 128 else 64 in
       SOME (arm_MLA_VEC (QREG' Rd) (QREG' Rn) (QREG' Rm) esize datasize)
+
+  | [0:1; q; 0b001110:6; size:2; 0b100000101110:12; Rn:5; Rd:5] ->
+    // ABS (vector)
+    if size = word 0b11 /\ ~q then NONE // "UNDEFINED" - 64-bit only with Q=1
+    else
+      let esize = 8 * (2 EXP (val size)) in
+      let datasize = if q then 128 else 64 in
+      SOME (arm_ABS_VEC (QREG' Rd) (QREG' Rn) esize datasize)
 
   | [0:1; q; 0b001111:6; sz:2; L:1; M:1; R:4; 0b1000:4; H:1; 0:1; Rn:5; Rd:5] ->
     // MUL (by element)
@@ -795,14 +843,53 @@ let decode = new_definition `!w:int32. decode w =
       SOME (arm_SRSHR_VEC (QREG' Rd) (QREG' Rn) amt esize datasize)
 
   | [0:1; q; 0b0011110:7; immh:4; immb:3; 0b000001:6; Rn:5; Rd:5] ->
-    // SSHR
-    if immh = (word 0b0: (4)word) then NONE // "asimdimm case"
+    // SSHR, or MOVI 32-bit (op=0, cmode=0000) when immh=0
+    if immh = (word 0b0: (4)word) then
+      // MOVI 32-bit, no shift (cmode=0000, op=0)
+      // immb reinterpreted as abc, Rn as defgh
+      let abc = immb in
+      let defgh = Rn in
+      let abcdefgh:(8)word = word_join abc defgh in
+      let imm32:(32)word = word_zx abcdefgh in
+      let imm64:(64)word = word_join imm32 imm32 in
+      if q then SOME (arm_MOVI (QREG' Rd) imm64)
+      else SOME (arm_MOVI (DREG' Rd) imm64)
     else if bit 3 immh /\ ~q then NONE // "UNDEFINED"
     else
       let esize = 8 * 2 EXP (3 - word_clz immh) in
       let datasize = if q then 128 else 64 in
       let amt = 2 * esize - val(word_join immh immb:7 word) in
       SOME (arm_SSHR_VEC (QREG' Rd) (QREG' Rn) amt esize datasize)
+
+  | [0:1; q; 0b0011110:7; immh:4; immb:3; 0b000101:6; Rn:5; Rd:5] ->
+    // ORR immediate 32-bit (op=0, cmode=0001) when immh=0
+    if immh = (word 0b0: (4)word) then
+      let abc = immb in
+      let defgh = Rn in
+      let abcdefgh:(8)word = word_join abc defgh in
+      let imm32:(32)word = word_zx abcdefgh in
+      let imm64:(64)word = word_join imm32 imm32 in
+      let datasize = if q then 128 else 64 in
+      let imm2 = if q then word_duplicate imm64 else word_zx imm64 in
+      SOME (arm_ORR_VEC (QREG' Rd) (QREG' Rd) (rvalue imm2) datasize)
+    else NONE
+
+  | [0:1; q; 0:1; 0b011110:6; 0b0000:4; abc:3; 0b0100:4; 0b01:2; defgh:5; Rd:5] ->
+    // MOVI (op=0, cmode=0100, 32-bit element with LSL #16)
+    if q then
+      let abcdefgh:(8)word = word_join abc defgh in
+      match arm_adv_simd_expand_imm abcdefgh (word 0:(1)word) (word 0b0100) with
+        SOME imm -> SOME (arm_MOVI (QREG' Rd) imm)
+      | NONE -> NONE
+    else NONE
+  | [0:1; q; 0:1; 0b011110:6; 0b0000:4; abc:3; 0b1101:4; 0b01:2; defgh:5; Rd:5] ->
+    // MOVI (op=0, cmode=1101, 32-bit element with MSL #16)
+    if q then
+      let abcdefgh:(8)word = word_join abc defgh in
+      match arm_adv_simd_expand_imm abcdefgh (word 0:(1)word) (word 0b1101) with
+        SOME imm -> SOME (arm_MOVI (QREG' Rd) imm)
+      | NONE -> NONE
+    else NONE
 
   | [0:1; q; 0b001110:6; size:2; 0:1; Rm:5; 0:1; op; 0b1010:4; Rn:5; Rd:5] ->
     // TRN1 and TRN2
@@ -828,6 +915,14 @@ let decode = new_definition `!w:int32. decode w =
     let datasize = if q then 128 else 64 in
     let elements = datasize DIV esize in
     SOME(arm_UADDLV (QREG' Rd) (QREG' Rn) elements esize)
+
+  | [0:1; q; 0b101110:6; size:2; 0b110000101010:12; Rn:5; Rd:5] ->
+    // UMAXV
+    if size = word 0b10 /\ ~q \/ size = word 0b11 then NONE else
+    let esize = 8 * 2 EXP (val size) in
+    let datasize = if q then 128 else 64 in
+    let elements = datasize DIV esize in
+    SOME(arm_UMAXV (QREG' Rd) (QREG' Rn) elements esize)
 
   | [0:1; q; 0b101110:6; size:2; 0b1:1; Rm:5; 0b100000:6; Rn:5; Rd:5] ->
     // UMLAL (vector, Q = 0). UMLAL2 (vector, Q=1)
@@ -935,6 +1030,13 @@ let decode = new_definition `!w:int32. decode w =
     // TBL (single register, i.e. len = 0, only)
     let datasize = if q then 128 else 64 in
     SOME(arm_TBL (QREG' Rd) [QREG' Rn] (QREG' Rm) datasize)
+
+  | [0:1; q; 0b001110000:9; Rm:5; 0b001000:6; Rn:5; Rd:5] ->
+    // TBL (2-register table, len = 1)
+    let datasize = if q then 128 else 64 in
+    SOME(arm_TBL2 (QREG' Rd) (QREG' Rn)
+                  (QREG' (word_add Rn (word 1:(5)word)))
+                  (QREG' Rm) datasize)
 
   | [0b11001110000:11; Rm:5; 0:1; Ra:5; Rn:5; Rd:5] ->
     // EOR3

@@ -1041,6 +1041,15 @@ static int32_t __attribute__((aligned(32))) mldsa_avx2_data[624] = {
     -3833893, -2286327, -3545687, -1362209, 1976782
 };
 
+// Separate data structure for x86 mldsa_pointwise (different order than mldsa_ntt)
+static int32_t __attribute__((aligned(32))) mldsa_pointwise_data[16] = {
+    // Offset 0-7: 8XQINV (8 copies of MLDSA_QINV = 58728449)
+    58728449, 58728449, 58728449, 58728449, 58728449, 58728449, 58728449, 58728449,
+
+    // Offset 8-15: 8XQ (8 copies of MLDSA_Q = 8380417)
+    8380417, 8380417, 8380417, 8380417, 8380417, 8380417, 8380417, 8380417,
+};
+
 // ****************************************************************************
 // Reference implementations, basic and stupid ones in C
 // ****************************************************************************
@@ -2947,6 +2956,11 @@ uint64_t keccak_r[5][5] =
  { UINT64_C(28), UINT64_C(55), UINT64_C(25), UINT64_C(21), UINT64_C(56) },
  { UINT64_C(27), UINT64_C(20), UINT64_C(39), UINT64_C(8), UINT64_C(14) }
 };
+
+static const uint64_t rho8[4] = {0x0605040302010007, 0x0E0D0C0B0A09080F,
+                                     0x1615141312111017, 0x1E1D1C1B1A19181F};
+static const uint64_t rho56[4] = {0x0007060504030201, 0x080F0E0D0C0B0A09,
+                                     0x1017161514131211, 0x181F1E1D1C1B1A19};
 
 uint64_t rol(uint64_t x,uint64_t k)
 { k &= 0x3F;
@@ -12645,6 +12659,70 @@ int test_mldsa_reduce(void)
 #endif
 }
 
+// Reference implementation for MLDSA pointwise Montgomery multiplication
+// Computes c[i] = montgomery_reduce(a[i] * b[i]) for all i
+void reference_mldsa_pointwise(int32_t c[256], const int32_t a[256], const int32_t b[256])
+{
+    for (int i = 0; i < 256; i++) {
+        int64_t product = (int64_t)a[i] * (int64_t)b[i];
+        c[i] = reference_mldsa_reduce(product);
+    }
+}
+
+int test_mldsa_pointwise(void)
+{
+    uint64_t t, i;
+    // 32-byte alignment for AVX2/NEON vector instructions
+    int32_t a[256] __attribute__((aligned(32)));
+    int32_t b[256] __attribute__((aligned(32)));
+    int32_t c[256] __attribute__((aligned(32)));
+    int32_t d[256] __attribute__((aligned(32)));
+
+    printf("Testing mldsa_pointwise with %d cases\n", tests);
+
+    for (t = 0; t < tests; ++t) {
+        // Generate random polynomial coefficients in NTT domain
+        // Assume coefficients are bounded by 9*Q in absolute value
+        for (i = 0; i < 256; ++i) {
+            a[i] = (int32_t)(random64() % (2 * 9 * 8380417)) - 9 * 8380417;
+            b[i] = (int32_t)(random64() % (2 * 9 * 8380417)) - 9 * 8380417;
+        }
+
+        // Compute reference result
+        reference_mldsa_pointwise(d, a, b);
+
+        // Call the appropriate architecture-specific implementation
+#ifdef __x86_64__
+        mldsa_pointwise_x86(c, a, b, mldsa_pointwise_data);
+#else
+        mldsa_pointwise(c, a, b);
+#endif
+
+        // Compare results (both should be Montgomery-reduced)
+        for (i = 0; i < 256; ++i) {
+            // Apply canonical reduction for comparison
+            int32_t reduced_c = reference_poly_reduce(c[i]);
+            int32_t reduced_d = reference_poly_reduce(d[i]);
+
+            if (reduced_c != reduced_d) {
+                printf("Error in mldsa_pointwise element i = %"PRIu64"; "
+                       "code[%"PRIu64"] = 0x%08"PRIx32" (reduced: 0x%08"PRIx32") "
+                       "while reference[%"PRIu64"] = 0x%08"PRIx32" (reduced: 0x%08"PRIx32")\n",
+                       i, i, c[i], reduced_c, i, d[i], reduced_d);
+                return 1;
+            }
+        }
+
+        if (VERBOSE) {
+            printf("OK: mldsa_pointwise: a[0]=0x%08"PRIx32", b[0]=0x%08"PRIx32" => c[0]=0x%08"PRIx32"\n",
+                   a[0], b[0], c[0]);
+        }
+    }
+
+    printf("All OK\n");
+    return 0;
+}
+
 int test_mldsa_ntt(void)
 {
     // Skip test on non-x86_64 architectures
@@ -14440,9 +14518,6 @@ int test_sha3_keccak4_f1600(void)
 
 int test_sha3_keccak4_f1600_alt(void)
 {
-#ifdef __x86_64__
-  return 1;
-#else
   uint64_t t, i;
   uint64_t a[100], b[100], c[100];
   printf("Testing sha3_keccak4_f1600_alt with %d cases\n",tests);
@@ -14454,7 +14529,11 @@ int test_sha3_keccak4_f1600_alt(void)
      reference_keccak_f1600(b+25,a+25);
      reference_keccak_f1600(b+50,a+50);
      reference_keccak_f1600(b+75,a+75);
-     sha3_keccak4_f1600_alt(c,keccak_RC);
+     #ifdef __x86_64__
+       sha3_keccak4_f1600_alt(c,keccak_RC, rho8, rho56);
+     #else
+       sha3_keccak4_f1600_alt(c,keccak_RC);
+     #endif
      for (i = 0; i < 100; ++i)
       { if (b[i] != c[i])
          { printf("Error in keccak4_f1600 batch = %"PRIu64", element i = %"PRIu64"; "
@@ -14474,7 +14553,6 @@ int test_sha3_keccak4_f1600_alt(void)
    }
   printf("All OK\n");
   return 0;
-#endif
 }
 
 int test_sha3_keccak4_f1600_alt2(void)
@@ -15919,6 +15997,7 @@ int main(int argc, char *argv[])
   functionaltest(all,"edwards25519_scalarmuldouble_alt",test_edwards25519_scalarmuldouble_alt);
   functionaltest(all,"mldsa_intt",test_mldsa_intt);
   functionaltest(all,"mldsa_ntt",test_mldsa_ntt);
+  functionaltest(all,"mldsa_pointwise",test_mldsa_pointwise);
   functionaltest(all,"mldsa_reduce",test_mldsa_reduce);
   functionaltest(all,"mlkem_basemul_k2",test_mlkem_basemul_k2);
   functionaltest(all,"mlkem_basemul_k3",test_mlkem_basemul_k3);
@@ -15968,6 +16047,7 @@ int main(int argc, char *argv[])
   functionaltest(all,"secp256k1_jmixadd_alt",test_secp256k1_jmixadd_alt);
   functionaltest(all,"sha3_keccak_f1600",test_sha3_keccak_f1600);
   functionaltest(all,"sha3_keccak4_f1600",test_sha3_keccak4_f1600);
+  functionaltest(all,"sha3_keccak4_f1600_alt",test_sha3_keccak4_f1600_alt);
   functionaltest(bmi,"sm2_montjadd",test_sm2_montjadd);
   functionaltest(all,"sm2_montjadd_alt",test_sm2_montjadd_alt);
   functionaltest(bmi,"sm2_montjdouble",test_sm2_montjdouble);
@@ -15995,7 +16075,6 @@ int main(int argc, char *argv[])
     functionaltest(arm,"sha3_keccak_f1600_alt2",test_sha3_keccak_f1600_alt2);
     functionaltest(sha3,"sha3_keccak2_f1600",test_sha3_keccak2_f1600);
     functionaltest(sha3,"sha3_keccak2_f1600_alt",test_sha3_keccak2_f1600_alt);
-    functionaltest(sha3,"sha3_keccak4_f1600_alt",test_sha3_keccak4_f1600_alt);
     functionaltest(sha3,"sha3_keccak4_f1600_alt2",test_sha3_keccak4_f1600_alt2);
 
   }
