@@ -126,6 +126,9 @@ let iclasses =
   (*** BIT ***)
   "0x101110101xxxxx000111xxxxxxxxxx";
 
+  (*** BIF ***)
+  "0x101110111xxxxx000111xxxxxxxxxx";
+
   (*** CMGT, vector, register, signed ***)
   "0x001110xx1xxxxx001101xxxxxxxxxx";
 
@@ -199,6 +202,15 @@ let iclasses =
   "0100111100000xxx010001xxxxxxxxxx"; (* q=1, op=0, cmode=0100, LSL #16 *)
   "0100111100000xxx110101xxxxxxxxxx"; (* q=1, op=0, cmode=1101, MSL #16 *)
 
+  (*** MOVI (op=0, cmode=1110, byte) ***)
+  "0x00111100000xxx111001xxxxxxxxxx";
+
+  (*** MOVI (op=0, cmode=1000, 16-bit, q=1 only) -- shares opcode with SHRN ***)
+  "0100111100000xxx100001xxxxxxxxxx";
+
+  (*** MOVI (op=0, cmode=1010, 16-bit shifted, q=1 only) -- shares opcode with SSHLL ***)
+  "0100111100000xxx101001xxxxxxxxxx";
+
   (*** ORR (vector, immediate, 32-bit) ***)
   "0x00111100000xxx000101xxxxxxxxxx"; (* 32-bit ORR imm, immh=0 *)
 
@@ -237,6 +249,9 @@ let iclasses =
 
   (*** REV64 ***)
   "01001110xx100000000010xxxxxxxxxx";
+
+  (*** REV32 ***)
+  "01101110xx100000000010xxxxxxxxxx";
 
   (*** SHA256 Intrinsics ***)
   (*** SHA256H ***)
@@ -380,6 +395,17 @@ let iclasses =
   (*** USHL ***)
   "0x101110xx1xxxxx010001xxxxxxxxxx";
 
+  (*** USHLL / USHLL2 (make sure immh is nonzero) ***)
+  "0x10111101xxxxxx101001xxxxxxxxxx";
+  "0x101111001xxxxx101001xxxxxxxxxx";
+  "0x1011110001xxxx101001xxxxxxxxxx";
+  "0x10111100001xxx101001xxxxxxxxxx";
+
+  (*** SSHLL (make sure immh is nonzero) ***)
+  "0x001111001xxxxx101001xxxxxxxxxx";
+  "0x0011110001xxxx101001xxxxxxxxxx";
+  "0x00111100001xxx101001xxxxxxxxxx";
+
   (*** USHR (make sure immh is nonzero) ***)
   "0x10111101xxxxxx000001xxxxxxxxxx";
   "0x101111001xxxxx000001xxxxxxxxxx";
@@ -503,6 +529,9 @@ let check_insns () =
     "00111000010xxxxxxxxx11xxxxxxxxxx";
     "0011100101xxxxxxxxxxxxxxxxxxxxxx";
 
+    (*** ldrb / strb (shifted register, no shift S = 0) ***)
+    "001110000x1xxxxxxxx010xxxxxxxxxx";
+
     (*** ld1 (1 register, Post-immediate offset) ***)
     "0x001100110111110111xxxxxxxxxxxx";
 
@@ -619,7 +648,7 @@ let check_insns () =
       | Some idx ->
         let hexcode = "0x" ^ (String.sub l 0 idx) in
         let desc = String.trim (String.sub l (idx+1) (String.length l - idx - 1)) in
-        if String.starts_with ~prefix:".word" desc then true (* defines a constant *)
+        if starts_with ".word" desc then true (* defines a constant *)
         else
           try
             let opcode = int_of_string hexcode in
@@ -627,7 +656,7 @@ let check_insns () =
               true (* Check passes *)
             else
               List.exists (match_bitpattern opcode) iclasses
-          with _ -> false
+          with Failure _ -> false
     in
 
   let tmppath = Filename.temp_file "objdump" ".txt" in

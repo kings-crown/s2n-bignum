@@ -48,7 +48,6 @@ class FnMemInputOutput:
     return self.meminputs == io2.meminputs and self.memoutputs == io2.memoutputs and \
         self.temporaries == decl2.temporaries
 
-
 def parseFnDecl(s:str, filename:str) -> FnDecl:
   assert s.startswith("extern"), s
   original_lines = s
@@ -291,15 +290,28 @@ for arch in ["arm", "x86"]:
 
 # A list of functions that are either only in arm or x86
 onlyInArm = [
+  "aes_xts_decrypt",
+  "aes_xts_encrypt",
   "bignum_copy_row_from_table_8n",
   "bignum_copy_row_from_table_16",
   "bignum_copy_row_from_table_32",
   "bignum_emontredc_8n_cdiff",
+  "bignum_mod_n256k1",
+  "bignum_mod_p256k1",
   "curve25519_x25519_byte",
   "curve25519_x25519_byte_alt",
   "sha3_",
+  "mldsa_intt_arm",
   "mldsa_pointwise",
   "mldsa_ntt_arm",
+  "mldsa_pointwise_acc_l4",
+  "mldsa_pointwise_acc_l5",
+  "mldsa_pointwise_acc_l7",
+  "mldsa_poly_use_hint_32",
+  "mldsa_poly_use_hint_88",
+  "mldsa_rej_uniform_eta2_VARIABLE_TIME",
+  "mldsa_rej_uniform_eta4_VARIABLE_TIME",
+  "mldsa_rej_uniform_VARIABLE_TIME",
   "mlkem_ntt",
   "mlkem_intt",
   "mlkem_mulcache_compute",
@@ -333,7 +345,11 @@ onlyInX86 = [
   "mldsa_intt",
   "mldsa_ntt",
   "mldsa_nttunpack",
+  "mldsa_pointwise_acc_l4_x86",
+  "mldsa_pointwise_acc_l5_x86",
+  "mldsa_pointwise_acc_l7_x86",
   "mldsa_pointwise_x86",
+  "mldsa_caddq",
   "mldsa_reduce",
   "mlkem_frombytes",
   "mlkem_mulcache_compute_x86",
@@ -399,6 +415,7 @@ for archname in ["arm","x86"]:
 
     # Before printing input and output buffers, collect elem bytesize of buffers
     arg_elem_bytesizes = dict()
+    isPtr = lambda fullty, elemty: fullty.startswith(elemty + "*")
     isPtrOrArray = lambda fullty, elemty: fullty.startswith(elemty + "[") or fullty.startswith(elemty + "*")
     for argname, argtype, _ in fnsig.args:
       if isPtrOrArray(argtype, "int64_t") or isPtrOrArray(argtype, "uint64_t"):
@@ -408,6 +425,8 @@ for archname in ["arm","x86"]:
       elif isPtrOrArray(argtype, "int16_t") or isPtrOrArray(argtype, "uint16_t"):
         arg_elem_bytesizes[argname] = 2
       elif isPtrOrArray(argtype, "int8_t") or isPtrOrArray(argtype, "uint8_t"):
+        arg_elem_bytesizes[argname] = 1
+      elif isPtr(argtype, "s2n_bignum_AES_KEY"):
         arg_elem_bytesizes[argname] = 1
       elif "[" not in argtype and "*" not in argtype:
         continue
