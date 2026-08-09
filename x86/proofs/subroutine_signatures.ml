@@ -1805,6 +1805,23 @@ let subroutine_signatures = [
    ])
 );
 
+("bignum_mod_n256k1",
+  ([(*args*)
+     ("z", "uint64_t[static 4]", (*is const?*)"false");
+     ("k", "uint64_t", (*is const?*)"false");
+     ("x", "uint64_t*", (*is const?*)"true");
+   ],
+   "void",
+   [(* input buffers *)
+    ("x", "k"(* num elems *), 8(* elem bytesize *));
+   ],
+   [(* output buffers *)
+    ("z", "4"(* num elems *), 8(* elem bytesize *));
+   ],
+   [(* temporary buffers *)
+   ])
+);
+
 ("bignum_mod_n256k1_4",
   ([(*args*)
      ("z", "uint64_t[static 4]", (*is const?*)"false");
@@ -2003,6 +2020,23 @@ let subroutine_signatures = [
 );
 
 ("bignum_mod_p256_alt",
+  ([(*args*)
+     ("z", "uint64_t[static 4]", (*is const?*)"false");
+     ("k", "uint64_t", (*is const?*)"false");
+     ("x", "uint64_t*", (*is const?*)"true");
+   ],
+   "void",
+   [(* input buffers *)
+    ("x", "k"(* num elems *), 8(* elem bytesize *));
+   ],
+   [(* output buffers *)
+    ("z", "4"(* num elems *), 8(* elem bytesize *));
+   ],
+   [(* temporary buffers *)
+   ])
+);
+
+("bignum_mod_p256k1",
   ([(*args*)
      ("z", "uint64_t[static 4]", (*is const?*)"false");
      ("k", "uint64_t", (*is const?*)"false");
@@ -4718,6 +4752,21 @@ let subroutine_signatures = [
    ])
 );
 
+("mldsa_caddq",
+  ([(*args*)
+     ("a", "int32_t[static 256]", (*is const?*)"false");
+   ],
+   "void",
+   [(* input buffers *)
+    ("a", "256"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* output buffers *)
+    ("a", "256"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* temporary buffers *)
+   ])
+);
+
 ("mldsa_intt",
   ([(*args*)
      ("a", "int32_t[static 256]", (*is const?*)"false");
@@ -4767,6 +4816,66 @@ let subroutine_signatures = [
    ])
 );
 
+("mldsa_pointwise_acc_l4_x86",
+  ([(*args*)
+     ("c", "int32_t[static 256]", (*is const?*)"false");
+     ("a", "int32_t[static 1024]", (*is const?*)"true");
+     ("b", "int32_t[static 1024]", (*is const?*)"true");
+     ("qdata", "int32_t[static 16]", (*is const?*)"true");
+   ],
+   "void",
+   [(* input buffers *)
+    ("a", "1024"(* num elems *), 4(* elem bytesize *));
+    ("b", "1024"(* num elems *), 4(* elem bytesize *));
+    ("qdata", "16"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* output buffers *)
+    ("c", "256"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* temporary buffers *)
+   ])
+);
+
+("mldsa_pointwise_acc_l5_x86",
+  ([(*args*)
+     ("c", "int32_t[static 256]", (*is const?*)"false");
+     ("a", "int32_t[static 1280]", (*is const?*)"true");
+     ("b", "int32_t[static 1280]", (*is const?*)"true");
+     ("qdata", "int32_t[static 16]", (*is const?*)"true");
+   ],
+   "void",
+   [(* input buffers *)
+    ("a", "1280"(* num elems *), 4(* elem bytesize *));
+    ("b", "1280"(* num elems *), 4(* elem bytesize *));
+    ("qdata", "16"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* output buffers *)
+    ("c", "256"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* temporary buffers *)
+   ])
+);
+
+("mldsa_pointwise_acc_l7_x86",
+  ([(*args*)
+     ("c", "int32_t[static 256]", (*is const?*)"false");
+     ("a", "int32_t[static 1792]", (*is const?*)"true");
+     ("b", "int32_t[static 1792]", (*is const?*)"true");
+     ("qdata", "int32_t[static 16]", (*is const?*)"true");
+   ],
+   "void",
+   [(* input buffers *)
+    ("a", "1792"(* num elems *), 4(* elem bytesize *));
+    ("b", "1792"(* num elems *), 4(* elem bytesize *));
+    ("qdata", "16"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* output buffers *)
+    ("c", "256"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* temporary buffers *)
+   ])
+);
+
 ("mldsa_pointwise_x86",
   ([(*args*)
      ("c", "int32_t[static 256]", (*is const?*)"false");
@@ -4797,6 +4906,24 @@ let subroutine_signatures = [
    ],
    [(* output buffers *)
     ("a", "256"(* num elems *), 4(* elem bytesize *));
+   ],
+   [(* temporary buffers *)
+   ])
+);
+
+("mldsa_rej_uniform_VARIABLE_TIME_x86",
+  ([(*args*)
+     ("r", "int32_t[static 256]", (*is const?*)"false");
+     ("buf", "uint8_t[static 840]", (*is const?*)"true");
+     ("table", "uint64_t[static 256]", (*is const?*)"true");
+   ],
+   "uint32_t",
+   [(* input buffers *)
+    ("buf", "840"(* num elems *), 1(* elem bytesize *));
+    ("table", "256"(* num elems *), 8(* elem bytesize *));
+   ],
+   [(* output buffers *)
+    ("r", "256"(* num elems *), 4(* elem bytesize *));
    ],
    [(* temporary buffers *)
    ])
@@ -5641,7 +5768,6 @@ let subroutine_signatures = [
    [(* temporary buffers *)
    ])
 );
-
 
 ("sha3_keccak_f1600",
   ([(*args*)

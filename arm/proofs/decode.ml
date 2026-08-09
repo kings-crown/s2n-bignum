@@ -325,9 +325,11 @@ let decode = new_definition `!w:int32. decode w =
     SOME (arm_ldst_q is_ld Rt (XREG_SP Rn) (Immediate_Offset (word (val imm12 * 16))))
   | [0b11:2; 0b111101:6; 0b0:1; is_ld; imm12:12; Rn:5; Rt:5] ->
     SOME (arm_ldst_d is_ld Rt (XREG_SP Rn) (Immediate_Offset (word (val imm12 * 8))))
-  // Post-immediate offset, size 128 only
+  // Post-immediate offset, sizes 128 and 64
   | [0b00:2; 0b1111001:7; is_ld; 0:1; imm9:9; 0b01:2; Rn:5; Rt:5] ->
     SOME (arm_ldst_q is_ld Rt (XREG_SP Rn) (Postimmediate_Offset (word_sx imm9)))
+  | [0b11:2; 0b1111000:7; is_ld; 0:1; imm9:9; 0b01:2; Rn:5; Rt:5] ->
+    SOME (arm_ldst_d is_ld Rt (XREG_SP Rn) (Postimmediate_Offset (word_sx imm9)))
   // Shifted register, size 128 only, no extensions (i.e. only UXTX)
   | [0b00:2; 0b1111001:7; is_ld; 1:1; Rm:5; 0b011:3; S; 0b10:2;  Rn:5; Rt:5] ->
     SOME (arm_ldst_q is_ld Rt (XREG_SP Rn)
@@ -356,9 +358,11 @@ let decode = new_definition `!w:int32. decode w =
     SOME (arm_ldstp_d is_ld Rt Rt2 (XREG_SP Rn)
      (Postimmediate_Offset (iword (ival imm7 * &8))))
 
-  // LDR/STR (immediate, SIMD&FP), Pre-index (has writeback)
+  // LDR/STR (immediate, SIMD&FP), Pre-index (has writeback), sizes 128 and 64
   | [0b00:2; 0b1111001:7; is_ld; 0:1; imm9:9; 0b11:2; Rn:5; Rt:5] ->
     SOME (arm_ldst_q is_ld Rt (XREG_SP Rn) (Preimmediate_Offset (word_sx imm9)))
+  | [0b11:2; 0b1111000:7; is_ld; 0:1; imm9:9; 0b11:2; Rn:5; Rt:5] ->
+    SOME (arm_ldst_d is_ld Rt (XREG_SP Rn) (Preimmediate_Offset (word_sx imm9)))
 
   // LDUR/STUR, only size 128
   | [0b00:2; 0b1111001:7; is_ld; 0:1; imm9:9; 0b00:2; Rn:5; Rt:5] ->
@@ -507,6 +511,10 @@ let decode = new_definition `!w:int32. decode w =
     // BIT
     SOME (arm_BIT (QREG' Rd) (QREG' Rn) (QREG' Rm) (if q then 128 else 64))
 
+  | [0:1; q; 0b101110111:9; Rm:5; 0b000111:6; Rn:5; Rd:5] ->
+    // BIF
+    SOME (arm_BIF (QREG' Rd) (QREG' Rn) (QREG' Rm) (if q then 128 else 64))
+
   // Two sizes of FCSEL, not allowing FP16 case at all
   | [0b00011110:8; 0b00:2; 0b1:1; Rm:5; cond:4; 0b11:2; Rn:5; Rd:5] ->
     SOME (arm_FCSEL (QREG' Rd) (QREG' Rn) (QREG' Rm) (Condition cond) 32)
@@ -608,7 +616,24 @@ let decode = new_definition `!w:int32. decode w =
         let datasize = if q then 128 else 64 in
         let shift = (esize * 2) - val (word_join immh immb:(7)word) in
         SOME (arm_SRI_VEC (QREG' Rd) (QREG' Rn) shift esize datasize)
+    else if cmode = (word 0b1010:(4)word) then
+      // USHLL, USHLL2
+      let immb = abc in
+      let Rn = defgh in
+      if val immh = 0 then NONE
+      else if bit 3 immh then NONE // "UNDEFINED" (would need 128-bit elements)
+      else
+        let esize = 8 * 2 EXP (3 - word_clz immh) in
+        let shift = val (word_join immh immb:(7)word) - esize in
+        if q then SOME (arm_USHLL2_VEC (QREG' Rd) (QREG' Rn) shift esize)
+        else SOME (arm_USHLL_VEC (QREG' Rd) (QREG' Rn) shift esize)
     else NONE
+
+  | [0:1; q; 0:1; 0b011110:6; 0b0000:4; abc:3; 0b1110:4; 0b01:2; defgh:5; Rd:5] ->
+    // MOVI (op=0, cmode=1110, immh=0)
+    let abcdefgh:(8)word = word_join abc defgh in
+    if q then SOME (arm_MOVI (QREG' Rd) (word_duplicate abcdefgh))
+    else SOME (arm_MOVI (DREG' Rd) (word_duplicate abcdefgh))
 
   | [0b0001111000100110000000:22; Rn:5; Rd:5] ->
     // FMOV (single, to general)
@@ -711,6 +736,14 @@ let decode = new_definition `!w:int32. decode w =
       let esize:(64)word = word_shl (word 0b1000: (64)word) (val size) in
       SOME (arm_REV64_VEC (QREG' Rd) (QREG' Rn) (val esize))
 
+  | [0:1; q; 0b101110:6; size:2; 0b100000000010:12; Rn:5; Rd:5] ->
+    // REV32
+    if ~q then NONE // datasize = 64 is unsupported yet
+    else if size = (word 0b10: (2)word) \/ size = (word 0b11: (2)word) then NONE // "UNDEFINED"
+    else
+      let esize:(64)word = word_shl (word 0b1000: (64)word) (val size) in
+      SOME (arm_REV32_VEC (QREG' Rd) (QREG' Rn) (val esize))
+
   | [0b01101110000:11; imm5:5; 0:1; imm4:4; 1:1; Rn:5; Rd:5] ->
     // INS, or "MOV (element)"
     let size = word_ctz imm5 in
@@ -782,6 +815,14 @@ let decode = new_definition `!w:int32. decode w =
     // RAX1
     SOME (arm_RAX1 (QREG' Rd) (QREG' Rn) (QREG' Rm))
 
+  | [0:1; q; 0b0011110:7; immh:4; immb:3; 0b111001:6; Rn:5; Rd:5] ->
+    // MOVI (op=0, cmode=1110, byte immediate)
+    if immh = (word 0b0:(4)word) then
+      let abcdefgh:(8)word = word_join immb Rn in
+      if q then SOME (arm_MOVI (QREG' Rd) (word_duplicate abcdefgh))
+      else SOME (arm_MOVI (DREG' Rd) (word_duplicate abcdefgh))
+    else NONE
+
   | [0:1; q; 0b0011110:7; immh:4; immb:3; 0b010101:6; Rn:5; Rd:5] ->
     // SHL
     if immh = (word 0b0: (4)word) then NONE // "asimdimm case"
@@ -792,10 +833,36 @@ let decode = new_definition `!w:int32. decode w =
       let amt = val(word_join immh immb:7 word) - esize in
       SOME (arm_SHL_VEC (QREG' Rd) (QREG' Rn) amt esize datasize)
 
+  | [0:1; q; 0b0011110:7; immh:4; immb:3; 0b101001:6; Rn:5; Rd:5] ->
+    // SSHLL, SSHLL2 (or MOVI with cmode=1010 when immh=0 and Q=1)
+    if immh = (word 0b0:(4)word) then
+      if q then
+        let abcdefgh:(8)word = word_join immb Rn in
+        let imm = arm_adv_simd_expand_imm abcdefgh (word 0:(1)word) (word 0b1010) in
+        match imm with
+        | SOME imm -> SOME (arm_MOVI (QREG' Rd) imm)
+        | NONE -> NONE
+      else NONE
+    else if bit 3 immh then NONE // "UNDEFINED"
+    else
+      let esize = 8 * 2 EXP (3 - word_clz immh) in
+      let shift = val(word_join immh immb:7 word) - esize in
+      if q then
+        SOME (arm_SSHLL2_VEC (QREG' Rd) (QREG' Rn) shift esize)
+      else
+        SOME (arm_SSHLL_VEC (QREG' Rd) (QREG' Rn) shift esize)
+
   | [0:1; q; 0b0011110:7; immh:4; immb:3; 0b100001:6; Rn:5; Rd:5] ->
-    // SHRN
-    if q then NONE // writing to the upper part is unsupported yet
-    else if immh = (word 0b0:(4)word) then NONE // "asimdimm case"
+    // SHRN (or MOVI with cmode=1000 when immh=0 and Q=1)
+    if immh = (word 0b0:(4)word) then
+      if q then
+        let abcdefgh:(8)word = word_join immb Rn in
+        let imm = arm_adv_simd_expand_imm abcdefgh (word 0:(1)word) (word 0b1000) in
+        match imm with
+        | SOME imm -> SOME (arm_MOVI (QREG' Rd) imm)
+        | NONE -> NONE
+      else NONE
+    else if q then NONE // writing to the upper part is unsupported yet
     else if bit 3 immh then NONE // "UNDEFINED"
     else
       let esize = 8 * 2 EXP (3 - word_clz immh) in
@@ -1327,7 +1394,7 @@ let ALIAS_CONV =
       let th' = INST_TYPE (map (fun ty' -> ty,ty')
         (type_vars_in_term (concl th))) th in
       try f (CONV_RULE (CHANGED_CONV (REWRITE_CONV [SYM xth])) th')
-      with _ -> I in
+      with Failure _ -> I in
     g `:64` XZR_ZR o g `:32` WZR_ZR o f th in
   let f th =
     if can (find_term
@@ -1363,8 +1430,9 @@ let ALIAS_CONV =
   self := ONCE_DEPTH_CONV (REWRITES_CONV net);
   OPERAND_ALIAS_CONV THENC ALIAS_CONV;;
 
+open Compute;;
+
 let PURE_DECODE_CONV =
-  let open Compute in
 
   let custom_word_red_conv_list =
     (* No WORD_IWORD_CONV *)
@@ -1439,12 +1507,12 @@ let PURE_DECODE_CONV =
       let c = concl th in (* c should be: `decode .. = SOME ...` *)
       let r,_ = dest_comb (rhs c) in
       if is_const r && name_of r = "SOME" then th else failwith ""
-    with _ -> failwith ("PURE_DECODE_CONV: " ^ (string_of_term t));;
+    with Failure _ -> failwith ("PURE_DECODE_CONV: " ^ (string_of_term t));;
 
 let DECODE_CONV tm =
   let th = PURE_DECODE_CONV tm in
   try CONV_RULE (RAND_CONV (RAND_CONV ALIAS_CONV)) th
-  with _ -> th;;
+  with Failure _ -> th;;
 
 (* ------------------------------------------------------------------------- *)
 (* Testing and preparation.                                                  *)
@@ -1502,18 +1570,23 @@ let define_relocated_mc name (args, tm:term list * term): thm =
   | [] -> f (name, A)
   | (v::vs) -> mk_comb (mk_tm_comb f (mk_fun_ty (type_of v) A) vs, v) in
   let args0,args = args,rev args in
-  try new_definition (list_mk_forall
-    (args0, mk_eq (mk_tm_comb mk_var `:byte list` args, tm)))
-  with Failure _ ->
-    new_definition (list_mk_forall
-      (args0, mk_eq (mk_tm_comb mk_mconst `:byte list` args, tm)));;
+  let mc_def =
+    try new_definition (list_mk_forall
+      (args0, mk_eq (mk_tm_comb mk_var `:byte list` args, tm)))
+    with Failure _ ->
+      new_definition (list_mk_forall
+        (args0, mk_eq (mk_tm_comb mk_mconst `:byte list` args, tm))) in
+  (* break APPEND(4-byte list, list) to 4 consecutive CONSs. *)
+  let blth = (LAND_CONV (TOP_DEPTH_CONV num_CONV) THENC
+              REWRITE_CONV[bytelist_of_num]) `bytelist_of_num 4 x` in
+  REWRITE_RULE[APPEND; blth] mc_def;;
 
 needs "common/elf.ml";;
 
 let make_fn_word_list, make_fn_word_list_reloc =
   let print_list rhs_col =
     let indent = "\n" ^ String.make rhs_col ' ' in
-    fun rels start end_ head bs dec ->
+    fun next_rel start end_ head bs dec ->
       let buf = Buffer.create 1024 in
       Buffer.add_string buf start;
       let rec go pc prev_inst_printer = function
@@ -1523,7 +1596,7 @@ let make_fn_word_list, make_fn_word_list_reloc =
         go (pc + 4) (fun s ->
           (* s is either "" or ";" *)
           let opcode = get_int_le bs pc 4 in
-          match rels pc with
+          match next_rel pc with
           | None ->
           (Printf.bprintf buf "  %s0x%08x%s" head opcode s;
             let space_size = String.length head + String.length s + 12 in
@@ -1557,13 +1630,13 @@ let make_fn_word_list, make_fn_word_list_reloc =
   let print_list_reloc = print_list 24 in
   fun (bstext, constants, rels) ->
     let r = ref rels in
-    let f i = match !r with
+    let next_rel i = match !r with
     | (ty,(off,sym,add)) :: rels when off = i -> r := rels; Some (ty,sym,add)
     | _ -> None in
     (* The input argument of function X must match that of append_reloc_X.
      * ex) BL: append_reloc_BL
      *)
-    print_list_reloc f "(fun w BL ADR ADRP ADD_rri64 -> [\n" "]);;\n" "w " bstext;;
+    print_list_reloc next_rel "(fun w BL ADR ADRP ADD_rri64 -> [\n" "]);;\n" "w " bstext;;
 (*
 let trim_ret_core dec =
   let m1 = Array.length dec - 1 in
@@ -1640,16 +1713,6 @@ let N_SUBLIST_CONV =
 
   - : thm = |- [0; 1; 2; 3; 4; 5] = APPEND [0] (APPEND test1 [5])
 *)
-(*
-let define_trim_ret_thm name th =
-  let th = SPEC_ALL th in
-  let df,tm1 = dest_eq (concl th) in
-  let n, tm = trim_ret_off tm1 in
-  let rec args ls = function
-  | Comb(f,v) -> args (v::ls) f
-  | _ -> ls in
-  let defn = define_relocated_mc name (args [] df, tm) in
-  defn, TRANS th (N_SUBLIST_CONV (SPEC_ALL defn) n tm1);; *)
 
 let define_from_elf name file =
   define_word_list name (term_of_bytes (load_elf_contents_arm file));;
@@ -1849,12 +1912,13 @@ let term_of_relocs_arm, assert_relocs =
           Printf.eprintf "  actual opcode: `%s`\n" (string_of_term reloc_opcode);
           Printf.eprintf "  asserting opcode: `%s`\n" (string_of_term lhs);
           Printf.eprintf "  PC: %d (0x%x)\n" pc pc;
-          assert false)
+          failwith "assert_reloc_maker")
         in
         pc+4, next_insns
-      with _ -> failwith ("could not check opcode " ^ (string_of_term reloc_opcode)) in
+      with Failure _ -> failwith ("could not check opcode " ^ (string_of_term reloc_opcode)) in
 
-    (* opcode_fn is the large OCaml function printed by print_literal_relocs_from_elf *)
+    (* opcode_fn is the large OCaml function printed by
+       print_literal_relocs_from_elf *)
     fun (args,tm) opcode_fn ->
       let opcode_fn_implemented = opcode_fn
           (* This order should match the fn args printed by
@@ -1875,12 +1939,7 @@ let define_assert_relocs name (tm:term list * term) printed_opcodes_fn
     (constants:(string * bytes) list)
     :(thm(*machine code def*) * thm list(*data definitions of constants*)) =
   assert_relocs tm printed_opcodes_fn;
-  let mc_def = define_relocated_mc name tm in
-  let mc_def_canonicalized =
-    (* break APPEND(4-byte list, list) to 4 consecutive CONSs. *)
-    let blth = (LAND_CONV (TOP_DEPTH_CONV num_CONV) THENC
-                REWRITE_CONV[bytelist_of_num]) `bytelist_of_num 4 x` in
-    REWRITE_RULE[APPEND; blth] mc_def in
+  let mc_def_canonicalized = define_relocated_mc name tm in
   let datatype = `:((8)word)list` in
   (mc_def_canonicalized,
    map (fun (name,data) ->

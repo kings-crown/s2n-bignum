@@ -49,6 +49,10 @@ static uint64_t bb[16][BUFFERSIZE];
 
 static uint64_t bigbuff[100000];
 
+// AES keys for XTS mode testing
+static s2n_bignum_AES_KEY aes_key1, aes_key2;
+static uint8_t aes_iv[16];
+
 // Source of random 64-bit numbers with bit density
 // 0 = all zeros, 32 = "average", 64 = all ones
 // Then a generic one with the density itself randomized
@@ -440,6 +444,293 @@ uint8_t mlkem_rej_uniform_table[] =
   0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15   // 255
 };
 
+#ifdef __x86_64__
+// Constant lookup table for ML-DSA rejection sampling.  Matches the byte-list
+// table in x86/proofs/mldsa_rej_uniform_table.ml (256 entries, 8 bytes each =
+// 2048 bytes) interpreted as a uint64_t[256] table of VPERMD indices.
+
+uint8_t mldsa_rej_uniform_table[] =
+{
+   0,  0,  0,  0,  0,  0,  0,  0,  // 0
+   0,  0,  0,  0,  0,  0,  0,  0,  // 1
+   1,  0,  0,  0,  0,  0,  0,  0,  // 2
+   0,  1,  0,  0,  0,  0,  0,  0,  // 3
+   2,  0,  0,  0,  0,  0,  0,  0,  // 4
+   0,  2,  0,  0,  0,  0,  0,  0,  // 5
+   1,  2,  0,  0,  0,  0,  0,  0,  // 6
+   0,  1,  2,  0,  0,  0,  0,  0,  // 7
+   3,  0,  0,  0,  0,  0,  0,  0,  // 8
+   0,  3,  0,  0,  0,  0,  0,  0,  // 9
+   1,  3,  0,  0,  0,  0,  0,  0,  // 10
+   0,  1,  3,  0,  0,  0,  0,  0,  // 11
+   2,  3,  0,  0,  0,  0,  0,  0,  // 12
+   0,  2,  3,  0,  0,  0,  0,  0,  // 13
+   1,  2,  3,  0,  0,  0,  0,  0,  // 14
+   0,  1,  2,  3,  0,  0,  0,  0,  // 15
+   4,  0,  0,  0,  0,  0,  0,  0,  // 16
+   0,  4,  0,  0,  0,  0,  0,  0,  // 17
+   1,  4,  0,  0,  0,  0,  0,  0,  // 18
+   0,  1,  4,  0,  0,  0,  0,  0,  // 19
+   2,  4,  0,  0,  0,  0,  0,  0,  // 20
+   0,  2,  4,  0,  0,  0,  0,  0,  // 21
+   1,  2,  4,  0,  0,  0,  0,  0,  // 22
+   0,  1,  2,  4,  0,  0,  0,  0,  // 23
+   3,  4,  0,  0,  0,  0,  0,  0,  // 24
+   0,  3,  4,  0,  0,  0,  0,  0,  // 25
+   1,  3,  4,  0,  0,  0,  0,  0,  // 26
+   0,  1,  3,  4,  0,  0,  0,  0,  // 27
+   2,  3,  4,  0,  0,  0,  0,  0,  // 28
+   0,  2,  3,  4,  0,  0,  0,  0,  // 29
+   1,  2,  3,  4,  0,  0,  0,  0,  // 30
+   0,  1,  2,  3,  4,  0,  0,  0,  // 31
+   5,  0,  0,  0,  0,  0,  0,  0,  // 32
+   0,  5,  0,  0,  0,  0,  0,  0,  // 33
+   1,  5,  0,  0,  0,  0,  0,  0,  // 34
+   0,  1,  5,  0,  0,  0,  0,  0,  // 35
+   2,  5,  0,  0,  0,  0,  0,  0,  // 36
+   0,  2,  5,  0,  0,  0,  0,  0,  // 37
+   1,  2,  5,  0,  0,  0,  0,  0,  // 38
+   0,  1,  2,  5,  0,  0,  0,  0,  // 39
+   3,  5,  0,  0,  0,  0,  0,  0,  // 40
+   0,  3,  5,  0,  0,  0,  0,  0,  // 41
+   1,  3,  5,  0,  0,  0,  0,  0,  // 42
+   0,  1,  3,  5,  0,  0,  0,  0,  // 43
+   2,  3,  5,  0,  0,  0,  0,  0,  // 44
+   0,  2,  3,  5,  0,  0,  0,  0,  // 45
+   1,  2,  3,  5,  0,  0,  0,  0,  // 46
+   0,  1,  2,  3,  5,  0,  0,  0,  // 47
+   4,  5,  0,  0,  0,  0,  0,  0,  // 48
+   0,  4,  5,  0,  0,  0,  0,  0,  // 49
+   1,  4,  5,  0,  0,  0,  0,  0,  // 50
+   0,  1,  4,  5,  0,  0,  0,  0,  // 51
+   2,  4,  5,  0,  0,  0,  0,  0,  // 52
+   0,  2,  4,  5,  0,  0,  0,  0,  // 53
+   1,  2,  4,  5,  0,  0,  0,  0,  // 54
+   0,  1,  2,  4,  5,  0,  0,  0,  // 55
+   3,  4,  5,  0,  0,  0,  0,  0,  // 56
+   0,  3,  4,  5,  0,  0,  0,  0,  // 57
+   1,  3,  4,  5,  0,  0,  0,  0,  // 58
+   0,  1,  3,  4,  5,  0,  0,  0,  // 59
+   2,  3,  4,  5,  0,  0,  0,  0,  // 60
+   0,  2,  3,  4,  5,  0,  0,  0,  // 61
+   1,  2,  3,  4,  5,  0,  0,  0,  // 62
+   0,  1,  2,  3,  4,  5,  0,  0,  // 63
+   6,  0,  0,  0,  0,  0,  0,  0,  // 64
+   0,  6,  0,  0,  0,  0,  0,  0,  // 65
+   1,  6,  0,  0,  0,  0,  0,  0,  // 66
+   0,  1,  6,  0,  0,  0,  0,  0,  // 67
+   2,  6,  0,  0,  0,  0,  0,  0,  // 68
+   0,  2,  6,  0,  0,  0,  0,  0,  // 69
+   1,  2,  6,  0,  0,  0,  0,  0,  // 70
+   0,  1,  2,  6,  0,  0,  0,  0,  // 71
+   3,  6,  0,  0,  0,  0,  0,  0,  // 72
+   0,  3,  6,  0,  0,  0,  0,  0,  // 73
+   1,  3,  6,  0,  0,  0,  0,  0,  // 74
+   0,  1,  3,  6,  0,  0,  0,  0,  // 75
+   2,  3,  6,  0,  0,  0,  0,  0,  // 76
+   0,  2,  3,  6,  0,  0,  0,  0,  // 77
+   1,  2,  3,  6,  0,  0,  0,  0,  // 78
+   0,  1,  2,  3,  6,  0,  0,  0,  // 79
+   4,  6,  0,  0,  0,  0,  0,  0,  // 80
+   0,  4,  6,  0,  0,  0,  0,  0,  // 81
+   1,  4,  6,  0,  0,  0,  0,  0,  // 82
+   0,  1,  4,  6,  0,  0,  0,  0,  // 83
+   2,  4,  6,  0,  0,  0,  0,  0,  // 84
+   0,  2,  4,  6,  0,  0,  0,  0,  // 85
+   1,  2,  4,  6,  0,  0,  0,  0,  // 86
+   0,  1,  2,  4,  6,  0,  0,  0,  // 87
+   3,  4,  6,  0,  0,  0,  0,  0,  // 88
+   0,  3,  4,  6,  0,  0,  0,  0,  // 89
+   1,  3,  4,  6,  0,  0,  0,  0,  // 90
+   0,  1,  3,  4,  6,  0,  0,  0,  // 91
+   2,  3,  4,  6,  0,  0,  0,  0,  // 92
+   0,  2,  3,  4,  6,  0,  0,  0,  // 93
+   1,  2,  3,  4,  6,  0,  0,  0,  // 94
+   0,  1,  2,  3,  4,  6,  0,  0,  // 95
+   5,  6,  0,  0,  0,  0,  0,  0,  // 96
+   0,  5,  6,  0,  0,  0,  0,  0,  // 97
+   1,  5,  6,  0,  0,  0,  0,  0,  // 98
+   0,  1,  5,  6,  0,  0,  0,  0,  // 99
+   2,  5,  6,  0,  0,  0,  0,  0,  // 100
+   0,  2,  5,  6,  0,  0,  0,  0,  // 101
+   1,  2,  5,  6,  0,  0,  0,  0,  // 102
+   0,  1,  2,  5,  6,  0,  0,  0,  // 103
+   3,  5,  6,  0,  0,  0,  0,  0,  // 104
+   0,  3,  5,  6,  0,  0,  0,  0,  // 105
+   1,  3,  5,  6,  0,  0,  0,  0,  // 106
+   0,  1,  3,  5,  6,  0,  0,  0,  // 107
+   2,  3,  5,  6,  0,  0,  0,  0,  // 108
+   0,  2,  3,  5,  6,  0,  0,  0,  // 109
+   1,  2,  3,  5,  6,  0,  0,  0,  // 110
+   0,  1,  2,  3,  5,  6,  0,  0,  // 111
+   4,  5,  6,  0,  0,  0,  0,  0,  // 112
+   0,  4,  5,  6,  0,  0,  0,  0,  // 113
+   1,  4,  5,  6,  0,  0,  0,  0,  // 114
+   0,  1,  4,  5,  6,  0,  0,  0,  // 115
+   2,  4,  5,  6,  0,  0,  0,  0,  // 116
+   0,  2,  4,  5,  6,  0,  0,  0,  // 117
+   1,  2,  4,  5,  6,  0,  0,  0,  // 118
+   0,  1,  2,  4,  5,  6,  0,  0,  // 119
+   3,  4,  5,  6,  0,  0,  0,  0,  // 120
+   0,  3,  4,  5,  6,  0,  0,  0,  // 121
+   1,  3,  4,  5,  6,  0,  0,  0,  // 122
+   0,  1,  3,  4,  5,  6,  0,  0,  // 123
+   2,  3,  4,  5,  6,  0,  0,  0,  // 124
+   0,  2,  3,  4,  5,  6,  0,  0,  // 125
+   1,  2,  3,  4,  5,  6,  0,  0,  // 126
+   0,  1,  2,  3,  4,  5,  6,  0,  // 127
+   7,  0,  0,  0,  0,  0,  0,  0,  // 128
+   0,  7,  0,  0,  0,  0,  0,  0,  // 129
+   1,  7,  0,  0,  0,  0,  0,  0,  // 130
+   0,  1,  7,  0,  0,  0,  0,  0,  // 131
+   2,  7,  0,  0,  0,  0,  0,  0,  // 132
+   0,  2,  7,  0,  0,  0,  0,  0,  // 133
+   1,  2,  7,  0,  0,  0,  0,  0,  // 134
+   0,  1,  2,  7,  0,  0,  0,  0,  // 135
+   3,  7,  0,  0,  0,  0,  0,  0,  // 136
+   0,  3,  7,  0,  0,  0,  0,  0,  // 137
+   1,  3,  7,  0,  0,  0,  0,  0,  // 138
+   0,  1,  3,  7,  0,  0,  0,  0,  // 139
+   2,  3,  7,  0,  0,  0,  0,  0,  // 140
+   0,  2,  3,  7,  0,  0,  0,  0,  // 141
+   1,  2,  3,  7,  0,  0,  0,  0,  // 142
+   0,  1,  2,  3,  7,  0,  0,  0,  // 143
+   4,  7,  0,  0,  0,  0,  0,  0,  // 144
+   0,  4,  7,  0,  0,  0,  0,  0,  // 145
+   1,  4,  7,  0,  0,  0,  0,  0,  // 146
+   0,  1,  4,  7,  0,  0,  0,  0,  // 147
+   2,  4,  7,  0,  0,  0,  0,  0,  // 148
+   0,  2,  4,  7,  0,  0,  0,  0,  // 149
+   1,  2,  4,  7,  0,  0,  0,  0,  // 150
+   0,  1,  2,  4,  7,  0,  0,  0,  // 151
+   3,  4,  7,  0,  0,  0,  0,  0,  // 152
+   0,  3,  4,  7,  0,  0,  0,  0,  // 153
+   1,  3,  4,  7,  0,  0,  0,  0,  // 154
+   0,  1,  3,  4,  7,  0,  0,  0,  // 155
+   2,  3,  4,  7,  0,  0,  0,  0,  // 156
+   0,  2,  3,  4,  7,  0,  0,  0,  // 157
+   1,  2,  3,  4,  7,  0,  0,  0,  // 158
+   0,  1,  2,  3,  4,  7,  0,  0,  // 159
+   5,  7,  0,  0,  0,  0,  0,  0,  // 160
+   0,  5,  7,  0,  0,  0,  0,  0,  // 161
+   1,  5,  7,  0,  0,  0,  0,  0,  // 162
+   0,  1,  5,  7,  0,  0,  0,  0,  // 163
+   2,  5,  7,  0,  0,  0,  0,  0,  // 164
+   0,  2,  5,  7,  0,  0,  0,  0,  // 165
+   1,  2,  5,  7,  0,  0,  0,  0,  // 166
+   0,  1,  2,  5,  7,  0,  0,  0,  // 167
+   3,  5,  7,  0,  0,  0,  0,  0,  // 168
+   0,  3,  5,  7,  0,  0,  0,  0,  // 169
+   1,  3,  5,  7,  0,  0,  0,  0,  // 170
+   0,  1,  3,  5,  7,  0,  0,  0,  // 171
+   2,  3,  5,  7,  0,  0,  0,  0,  // 172
+   0,  2,  3,  5,  7,  0,  0,  0,  // 173
+   1,  2,  3,  5,  7,  0,  0,  0,  // 174
+   0,  1,  2,  3,  5,  7,  0,  0,  // 175
+   4,  5,  7,  0,  0,  0,  0,  0,  // 176
+   0,  4,  5,  7,  0,  0,  0,  0,  // 177
+   1,  4,  5,  7,  0,  0,  0,  0,  // 178
+   0,  1,  4,  5,  7,  0,  0,  0,  // 179
+   2,  4,  5,  7,  0,  0,  0,  0,  // 180
+   0,  2,  4,  5,  7,  0,  0,  0,  // 181
+   1,  2,  4,  5,  7,  0,  0,  0,  // 182
+   0,  1,  2,  4,  5,  7,  0,  0,  // 183
+   3,  4,  5,  7,  0,  0,  0,  0,  // 184
+   0,  3,  4,  5,  7,  0,  0,  0,  // 185
+   1,  3,  4,  5,  7,  0,  0,  0,  // 186
+   0,  1,  3,  4,  5,  7,  0,  0,  // 187
+   2,  3,  4,  5,  7,  0,  0,  0,  // 188
+   0,  2,  3,  4,  5,  7,  0,  0,  // 189
+   1,  2,  3,  4,  5,  7,  0,  0,  // 190
+   0,  1,  2,  3,  4,  5,  7,  0,  // 191
+   6,  7,  0,  0,  0,  0,  0,  0,  // 192
+   0,  6,  7,  0,  0,  0,  0,  0,  // 193
+   1,  6,  7,  0,  0,  0,  0,  0,  // 194
+   0,  1,  6,  7,  0,  0,  0,  0,  // 195
+   2,  6,  7,  0,  0,  0,  0,  0,  // 196
+   0,  2,  6,  7,  0,  0,  0,  0,  // 197
+   1,  2,  6,  7,  0,  0,  0,  0,  // 198
+   0,  1,  2,  6,  7,  0,  0,  0,  // 199
+   3,  6,  7,  0,  0,  0,  0,  0,  // 200
+   0,  3,  6,  7,  0,  0,  0,  0,  // 201
+   1,  3,  6,  7,  0,  0,  0,  0,  // 202
+   0,  1,  3,  6,  7,  0,  0,  0,  // 203
+   2,  3,  6,  7,  0,  0,  0,  0,  // 204
+   0,  2,  3,  6,  7,  0,  0,  0,  // 205
+   1,  2,  3,  6,  7,  0,  0,  0,  // 206
+   0,  1,  2,  3,  6,  7,  0,  0,  // 207
+   4,  6,  7,  0,  0,  0,  0,  0,  // 208
+   0,  4,  6,  7,  0,  0,  0,  0,  // 209
+   1,  4,  6,  7,  0,  0,  0,  0,  // 210
+   0,  1,  4,  6,  7,  0,  0,  0,  // 211
+   2,  4,  6,  7,  0,  0,  0,  0,  // 212
+   0,  2,  4,  6,  7,  0,  0,  0,  // 213
+   1,  2,  4,  6,  7,  0,  0,  0,  // 214
+   0,  1,  2,  4,  6,  7,  0,  0,  // 215
+   3,  4,  6,  7,  0,  0,  0,  0,  // 216
+   0,  3,  4,  6,  7,  0,  0,  0,  // 217
+   1,  3,  4,  6,  7,  0,  0,  0,  // 218
+   0,  1,  3,  4,  6,  7,  0,  0,  // 219
+   2,  3,  4,  6,  7,  0,  0,  0,  // 220
+   0,  2,  3,  4,  6,  7,  0,  0,  // 221
+   1,  2,  3,  4,  6,  7,  0,  0,  // 222
+   0,  1,  2,  3,  4,  6,  7,  0,  // 223
+   5,  6,  7,  0,  0,  0,  0,  0,  // 224
+   0,  5,  6,  7,  0,  0,  0,  0,  // 225
+   1,  5,  6,  7,  0,  0,  0,  0,  // 226
+   0,  1,  5,  6,  7,  0,  0,  0,  // 227
+   2,  5,  6,  7,  0,  0,  0,  0,  // 228
+   0,  2,  5,  6,  7,  0,  0,  0,  // 229
+   1,  2,  5,  6,  7,  0,  0,  0,  // 230
+   0,  1,  2,  5,  6,  7,  0,  0,  // 231
+   3,  5,  6,  7,  0,  0,  0,  0,  // 232
+   0,  3,  5,  6,  7,  0,  0,  0,  // 233
+   1,  3,  5,  6,  7,  0,  0,  0,  // 234
+   0,  1,  3,  5,  6,  7,  0,  0,  // 235
+   2,  3,  5,  6,  7,  0,  0,  0,  // 236
+   0,  2,  3,  5,  6,  7,  0,  0,  // 237
+   1,  2,  3,  5,  6,  7,  0,  0,  // 238
+   0,  1,  2,  3,  5,  6,  7,  0,  // 239
+   4,  5,  6,  7,  0,  0,  0,  0,  // 240
+   0,  4,  5,  6,  7,  0,  0,  0,  // 241
+   1,  4,  5,  6,  7,  0,  0,  0,  // 242
+   0,  1,  4,  5,  6,  7,  0,  0,  // 243
+   2,  4,  5,  6,  7,  0,  0,  0,  // 244
+   0,  2,  4,  5,  6,  7,  0,  0,  // 245
+   1,  2,  4,  5,  6,  7,  0,  0,  // 246
+   0,  1,  2,  4,  5,  6,  7,  0,  // 247
+   3,  4,  5,  6,  7,  0,  0,  0,  // 248
+   0,  3,  4,  5,  6,  7,  0,  0,  // 249
+   1,  3,  4,  5,  6,  7,  0,  0,  // 250
+   0,  1,  3,  4,  5,  6,  7,  0,  // 251
+   2,  3,  4,  5,  6,  7,  0,  0,  // 252
+   0,  2,  3,  4,  5,  6,  7,  0,  // 253
+   1,  2,  3,  4,  5,  6,  7,  0,  // 254
+   0,  1,  2,  3,  4,  5,  6,  7   // 255
+};
+#else
+// Base ML-DSA rej-uniform compaction table (see test.c / the proof);
+// used by the ARM rej_uniform benchmark call below.
+uint8_t mldsa_rej_uniform_table[] =
+{ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  // 0
+   0,  1,  2,  3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  // 1
+   4,  5,  6,  7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  // 2
+   0,  1,  2,  3,  4,  5,  6,  7, -1, -1, -1, -1, -1, -1, -1, -1,  // 3
+   8,  9, 10, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  // 4
+   0,  1,  2,  3,  8,  9, 10, 11, -1, -1, -1, -1, -1, -1, -1, -1,  // 5
+   4,  5,  6,  7,  8,  9, 10, 11, -1, -1, -1, -1, -1, -1, -1, -1,  // 6
+   0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, -1, -1, -1, -1,  // 7
+  12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  // 8
+   0,  1,  2,  3, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1,  // 9
+   4,  5,  6,  7, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1,  // 10
+   0,  1,  2,  3,  4,  5,  6,  7, 12, 13, 14, 15, -1, -1, -1, -1,  // 11
+   8,  9, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1,  // 12
+   0,  1,  2,  3,  8,  9, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1,  // 13
+   4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1,  // 14
+   0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15   // 15
+};
+#endif
+
 // Wrappers round the functions to call uniformly
 
 void call_bignum_add__4_4(void) repeat(bignum_add(4,b0,4,b1,4,b2))
@@ -808,6 +1099,8 @@ void call_bignum_mod_n256_4(void) repeat(bignum_mod_n256_4(b0,b1))
 void call_bignum_mod_p256_4(void) repeat(bignum_mod_p256_4(b0,b1))
 void call_bignum_mod_n256k1_4(void) repeat(bignum_mod_n256k1_4(b0,b1))
 void call_bignum_mod_p256k1_4(void) repeat(bignum_mod_p256k1_4(b0,b1))
+void call_bignum_mod_n256k1__8(void) repeat(bignum_mod_n256k1(b0,8,b1))
+void call_bignum_mod_p256k1__8(void) repeat(bignum_mod_p256k1(b0,8,b1))
 void call_bignum_mod_n384_6(void) repeat(bignum_mod_n384_6(b0,b1))
 void call_bignum_mod_p384_6(void) repeat(bignum_mod_p384_6(b0,b1))
 void call_bignum_mod_n521_9(void) repeat(bignum_mod_n521_9(b0,b1))
@@ -1095,11 +1388,25 @@ void call_sm2_montjscalarmul_alt(void) repeatfewer(10,sm2_montjscalarmul_alt(b1,
 
 #ifdef __x86_64__
 
+static int32_t __attribute__((aligned(32))) mldsa_avx2_qdata[16] = {
+    8380417, 8380417, 8380417, 8380417, 8380417, 8380417, 8380417, 8380417,  // 8XQ
+    58728449, 58728449, 58728449, 58728449, 58728449, 58728449, 58728449, 58728449  // 8XQINV
+};
+
+void call_mldsa_caddq(void) repeat(mldsa_caddq((int32_t*)b0))
 void call_mldsa_intt(void) repeat(mldsa_intt((int32_t*)b0,(const int32_t*)b1))
 void call_mldsa_ntt(void) repeat(mldsa_ntt((int32_t*)b0,(const int32_t*)b1))
 void call_mldsa_nttunpack(void) repeat(mldsa_nttunpack((int32_t*)b0))
 void call_mldsa_pointwise(void) repeat(mldsa_pointwise_x86((int32_t*)b0,(int32_t*)b1,(int32_t*)b2,(int32_t*)b3))
+void call_mldsa_pointwise_acc_l4(void) repeat(mldsa_pointwise_acc_l4_x86((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2,mldsa_avx2_qdata))
+void call_mldsa_pointwise_acc_l5(void) repeat(mldsa_pointwise_acc_l5_x86((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2,mldsa_avx2_qdata))
+void call_mldsa_pointwise_acc_l7(void) repeat(mldsa_pointwise_acc_l7_x86((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2,mldsa_avx2_qdata))
+void call_mldsa_poly_use_hint_32(void) {}
+void call_mldsa_poly_use_hint_88(void) {}
 void call_mldsa_reduce(void) repeat(mldsa_reduce((int32_t*)b0))
+void call_mldsa_rej_uniform(void) repeat(mldsa_rej_uniform_VARIABLE_TIME_x86((int32_t*)b0,(uint8_t*)b1,(const uint64_t*)mldsa_rej_uniform_table))
+void call_mldsa_rej_uniform_eta2(void) {}
+void call_mldsa_rej_uniform_eta4(void) {}
 
 void call_mlkem_frombytes(void) repeat(mlkem_frombytes((uint16_t*)b0,(int8_t*)b1))
 void call_mlkem_intt(void) repeat(mlkem_intt_x86((int16_t*)b0,(int16_t*)b1))
@@ -1120,12 +1427,35 @@ void call_sha3_keccak2_f1600_alt(void) {}
 void call_sha3_keccak4_f1600_alt(void) repeat(sha3_keccak4_f1600_alt(b0,b1,b2,b3))
 void call_sha3_keccak4_f1600_alt2(void) {}
 
+void call_aes_xts_encrypt_16(void) {}
+void call_aes_xts_encrypt_32(void) {}
+void call_aes_xts_encrypt_64(void) {}
+void call_aes_xts_encrypt_128(void) {}
+void call_aes_xts_encrypt_256(void) {}
+void call_aes_xts_encrypt_512(void) {}
+
+void call_aes_xts_decrypt_16(void) {}
+void call_aes_xts_decrypt_32(void) {}
+void call_aes_xts_decrypt_64(void) {}
+void call_aes_xts_decrypt_128(void) {}
+void call_aes_xts_decrypt_256(void) {}
+void call_aes_xts_decrypt_512(void) {}
+
 #else
 
-void call_mldsa_intt(void) {}
+void call_mldsa_caddq(void) {}
+void call_mldsa_intt(void) repeat(mldsa_intt_arm((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2))
 void call_mldsa_ntt(void) repeat(mldsa_ntt_arm((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2))
 void call_mldsa_nttunpack(void) {}
 void call_mldsa_pointwise(void) repeat(mldsa_pointwise((int32_t*)b0,(int32_t*)b1,(int32_t*)b2))
+void call_mldsa_pointwise_acc_l4(void) repeat(mldsa_pointwise_acc_l4((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2))
+void call_mldsa_pointwise_acc_l5(void) repeat(mldsa_pointwise_acc_l5((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2))
+void call_mldsa_pointwise_acc_l7(void) repeat(mldsa_pointwise_acc_l7((int32_t*)b0,(const int32_t*)b1,(const int32_t*)b2))
+void call_mldsa_poly_use_hint_32(void) repeat(mldsa_poly_use_hint_32((int32_t*)b0,(int32_t*)b1,(int32_t*)b2))
+void call_mldsa_poly_use_hint_88(void) repeat(mldsa_poly_use_hint_88((int32_t*)b0,(int32_t*)b1,(int32_t*)b2))
+void call_mldsa_rej_uniform(void) repeat(mldsa_rej_uniform_VARIABLE_TIME((int32_t*)b0,(const uint8_t*)b1,1200,mldsa_rej_uniform_table))
+void call_mldsa_rej_uniform_eta2(void) repeat(mldsa_rej_uniform_eta2_VARIABLE_TIME((int32_t*)b0,(const uint8_t*)b1,272,(const uint8_t*)b2))
+void call_mldsa_rej_uniform_eta4(void) repeat(mldsa_rej_uniform_eta4_VARIABLE_TIME((int32_t*)b0,(const uint8_t*)b1,272,(const uint8_t*)b2))
 void call_mldsa_reduce(void) {}
 
 void call_bignum_copy_row_from_table_8n__32_16(void) \
@@ -1151,12 +1481,60 @@ void call_sha3_keccak4_f1600_alt2(void) repeat(sha3_keccak4_f1600_alt2(b0,b1))
 
 void call_mlkem_frombytes(void) {}
 void call_mlkem_unpack(void) {}
+
+// Helper function for AES XTS encrypt with parameterized length
+static void aes_xts_encrypt_helper(size_t len)
+{
+  int j;
+  for (j = 0; j < 30; ++j) {
+    aes_key1.rd_key[j] = b1[j % BUFFERSIZE];
+    aes_key2.rd_key[j] = b2[j % BUFFERSIZE];
+  }
+  aes_key1.rounds = 14;  // AES-256
+  aes_key2.rounds = 14;
+  for (j = 0; j < 16; ++j) aes_iv[j] = (uint8_t)(b3[j] & 0xFF);
+
+  aes_xts_encrypt((uint8_t*)b0, (uint8_t*)b1, len, &aes_key1, &aes_key2, aes_iv);
+}
+
+// AES XTS encrypt wrapper functions for different block sizes
+void call_aes_xts_encrypt_16(void) { repeat(aes_xts_encrypt_helper(16)); }
+void call_aes_xts_encrypt_32(void) { repeat(aes_xts_encrypt_helper(32)); }
+void call_aes_xts_encrypt_64(void) { repeat(aes_xts_encrypt_helper(64)); }
+void call_aes_xts_encrypt_128(void) { repeat(aes_xts_encrypt_helper(128)); }
+void call_aes_xts_encrypt_256(void) { repeat(aes_xts_encrypt_helper(256)); }
+void call_aes_xts_encrypt_512(void) { repeatfewer(10,aes_xts_encrypt_helper(512)); }
+
+// Helper function for AES XTS decrypt with parameterized length
+static void aes_xts_decrypt_helper(size_t len)
+{
+  int j;
+  for (j = 0; j < 30; ++j) {
+    aes_key1.rd_key[j] = b1[j % BUFFERSIZE];
+    aes_key2.rd_key[j] = b2[j % BUFFERSIZE];
+  }
+  aes_key1.rounds = 14;  // AES-256
+  aes_key2.rounds = 14;
+  for (j = 0; j < 16; ++j) aes_iv[j] = (uint8_t)(b3[j] & 0xFF);
+
+  aes_xts_decrypt((uint8_t*)b0, (uint8_t*)b1, len, &aes_key1, &aes_key2, aes_iv);
+}
+
+// AES XTS decrypt wrapper functions for different block sizes
+void call_aes_xts_decrypt_16(void) { repeat(aes_xts_decrypt_helper(16)); }
+void call_aes_xts_decrypt_32(void) { repeat(aes_xts_decrypt_helper(32)); }
+void call_aes_xts_decrypt_64(void) { repeat(aes_xts_decrypt_helper(64)); }
+void call_aes_xts_decrypt_128(void) { repeat(aes_xts_decrypt_helper(128)); }
+void call_aes_xts_decrypt_256(void) { repeat(aes_xts_decrypt_helper(256)); }
+void call_aes_xts_decrypt_512(void) { repeatfewer(10,aes_xts_decrypt_helper(512)); }
+
 #endif
 
 int main(int argc, char *argv[])
 {
   int bmi = get_arch_name() == ARCH_AARCH64 || supports_bmi2_and_adx();
   int sha3 = get_arch_name() == ARCH_AARCH64 && supports_arm_sha3();
+  int aes = get_arch_name() == ARCH_AARCH64 && supports_arm_aes();
   int all = 1;
   int arm = get_arch_name() == ARCH_AARCH64;
   char *argending;
@@ -1347,6 +1725,7 @@ int main(int argc, char *argv[])
   timingtest(bmi,"bignum_mod_n256 (8 -> 4)",call_bignum_mod_n256__8);
   timingtest(all,"bignum_mod_n256_alt (8 -> 4)",call_bignum_mod_n256_alt__8);
   timingtest(all,"bignum_mod_n256_4",call_bignum_mod_n256_4);
+  timingtest(all,"bignum_mod_n256k1 (8 -> 4)",call_bignum_mod_n256k1__8);
   timingtest(all,"bignum_mod_n256k1_4",call_bignum_mod_n256k1_4);
   timingtest(bmi,"bignum_mod_n384 (12 -> 6)",call_bignum_mod_n384__12);
   timingtest(all,"bignum_mod_n384_alt (12 -> 6)",call_bignum_mod_n384_alt__12);
@@ -1360,6 +1739,7 @@ int main(int argc, char *argv[])
   timingtest(bmi,"bignum_mod_p256 (8 -> 4)",call_bignum_mod_p256__8);
   timingtest(all,"bignum_mod_p256_alt (8 -> 4)",call_bignum_mod_p256_alt__8);
   timingtest(all,"bignum_mod_p256_4",call_bignum_mod_p256_4);
+  timingtest(all,"bignum_mod_p256k1 (8 -> 4)",call_bignum_mod_p256k1__8);
   timingtest(all,"bignum_mod_p256k1_4",call_bignum_mod_p256k1_4);
   timingtest(bmi,"bignum_mod_p384 (12 -> 6)",call_bignum_mod_p384__12);
   timingtest(all,"bignum_mod_p384_alt (12 -> 6)",call_bignum_mod_p384_alt__12);
@@ -1545,11 +1925,21 @@ int main(int argc, char *argv[])
   timingtest(all,"mlkem_tobytes",call_mlkem_tobytes);
   timingtest(all,"mlkem_tomont",call_mlkem_tomont);
   timingtest(!arm,"mlkem_unpack",call_mlkem_unpack);
-  timingtest(!arm,"mldsa_intt",call_mldsa_intt);
+  timingtest(!arm,"mldsa_caddq",call_mldsa_caddq);
+  timingtest(all,"mldsa_intt",call_mldsa_intt);
   timingtest(all,"mldsa_ntt",call_mldsa_ntt);
   timingtest(!arm,"mldsa_nttunpack",call_mldsa_nttunpack);
   timingtest(all,"mldsa_pointwise",call_mldsa_pointwise);
+  timingtest(all,"mldsa_pointwise_acc_l4",call_mldsa_pointwise_acc_l4);
+  timingtest(all,"mldsa_pointwise_acc_l5",call_mldsa_pointwise_acc_l5);
+  timingtest(all,"mldsa_pointwise_acc_l7",call_mldsa_pointwise_acc_l7);
+  timingtest(arm,"mldsa_poly_use_hint_32",call_mldsa_poly_use_hint_32);
+  timingtest(arm,"mldsa_poly_use_hint_88",call_mldsa_poly_use_hint_88);
+  timingtest(arm,"mldsa_rej_uniform_VARIABLE_TIME (1200 bytes)",call_mldsa_rej_uniform);
+  timingtest(arm,"mldsa_rej_uniform_eta2_VARIABLE_TIME",call_mldsa_rej_uniform_eta2);
+  timingtest(arm,"mldsa_rej_uniform_eta4_VARIABLE_TIME",call_mldsa_rej_uniform_eta4);
   timingtest(!arm,"mldsa_reduce",call_mldsa_reduce);
+  timingtest(!arm,"mldsa_rej_uniform",call_mldsa_rej_uniform);
   timingtest(bmi,"p256_montjadd",call_p256_montjadd);
   timingtest(all,"p256_montjadd_alt",call_p256_montjadd_alt);
   timingtest(bmi,"p256_montjdouble",call_p256_montjdouble);
@@ -1613,6 +2003,18 @@ int main(int argc, char *argv[])
   timingtest(all,"word_negmodinv",call_word_negmodinv);
   timingtest(all,"word_popcount",call_word_popcount);
   timingtest(all,"word_recip",call_word_recip);
+  timingtest(aes,"aes_xts_encrypt (16 bytes)",call_aes_xts_encrypt_16);
+  timingtest(aes,"aes_xts_encrypt (32 bytes)",call_aes_xts_encrypt_32);
+  timingtest(aes,"aes_xts_encrypt (64 bytes)",call_aes_xts_encrypt_64);
+  timingtest(aes,"aes_xts_encrypt (128 bytes)",call_aes_xts_encrypt_128);
+  timingtest(aes,"aes_xts_encrypt (256 bytes)",call_aes_xts_encrypt_256);
+  timingtest(aes,"aes_xts_encrypt (512 bytes)",call_aes_xts_encrypt_512);
+  timingtest(aes,"aes_xts_decrypt (16 bytes)",call_aes_xts_decrypt_16);
+  timingtest(aes,"aes_xts_decrypt (32 bytes)",call_aes_xts_decrypt_32);
+  timingtest(aes,"aes_xts_decrypt (64 bytes)",call_aes_xts_decrypt_64);
+  timingtest(aes,"aes_xts_decrypt (128 bytes)",call_aes_xts_decrypt_128);
+  timingtest(aes,"aes_xts_decrypt (256 bytes)",call_aes_xts_decrypt_256);
+  timingtest(aes,"aes_xts_decrypt (512 bytes)",call_aes_xts_decrypt_512);
 
   // Summarize performance in arithmetic and geometric means
 

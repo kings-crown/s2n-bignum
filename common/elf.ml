@@ -58,7 +58,8 @@ let load_elf (arch:int) (reloc_type:int -> 'a) (file:bytes):
     (* ELFCLASS64, ELFDATA2LSB, version 1, ELFOSABI_NONE *) then
     failwith "not a supported ELF filetype" else
   if get_int_le file 0x12 2 <> arch then
-    failwith "unexpected ELF architecture" else
+    failwith ("unexpected ELF architecture: " ^
+        (Printf.sprintf "%x" (get_int_le file 0x12 2))) else
 
   (* Read the ELF header (first 64 bytes of the file) to get section headers *)
   let section_headers: bytes array =
@@ -108,11 +109,11 @@ let load_elf (arch:int) (reloc_type:int -> 'a) (file:bytes):
        https://refspecs.linuxbase.org/elf/gabi4+/ch4.sheader.html
        has a table for their integer values, and  Figure 4-14
        has types for special sections such as .text . *)
-    fun name ty:bytes ->
+    fun name ty ->
       let hdr = find (fun header -> section_name header = name) headers in
       check_section_type hdr ty; hdr in
 
-  let find_section_contents (name,ty):bytes =
+  let find_section_contents (name,ty) =
       section_contents (find_section_header name ty) in
 
   (* From .strtab (string table) extract a string whose byte offset starts from
@@ -121,7 +122,7 @@ let load_elf (arch:int) (reloc_type:int -> 'a) (file:bytes):
     try let the_table = section_contents
         (find_section_header ".strtab" 3 (* SHT_STRTAB *)) in
       fun chridx -> get_string the_table chridx
-    with _ -> fun (chridx:int) -> "" in
+    with Failure _ -> fun (chridx:int) -> "" in
 
   (* The .rodata section (None if nonexistent) *)
   let rodata_contents:bytes option = catch
@@ -133,20 +134,20 @@ let load_elf (arch:int) (reloc_type:int -> 'a) (file:bytes):
       find_section_contents (".symtab",2 (* SHT_SYMTAB *)) in
 
   let symbol_name (symtab_idx:int): string =
-    let symtab = Option.get symtab_contents in
+    let symtab = option_get symtab_contents in
     let sym_entrysize = 24 (* size of Elf64_Sym struct *) in
     let char_idx = get_int_le symtab (symtab_idx * sym_entrysize) 4 in
     from_string_table char_idx
   in
   (* The "st_shndx" field *)
   let symbol_sectionidx (symtab_idx:int): int =
-    let symtab = Option.get symtab_contents in
+    let symtab = option_get symtab_contents in
     let sym_entrysize = 24 in
     get_int_le symtab (symtab_idx * sym_entrysize + 6) 2
   in
   (* Least-significant 4 bits of the "st_info" field *)
   let symbol_type (symtab_idx:int): int =
-    let symtab = Option.get symtab_contents in
+    let symtab = option_get symtab_contents in
     let sym_entrysize = 24 in
     let symbol_info = get_int_le symtab (symtab_idx * sym_entrysize + 4) 1 in
     symbol_info land 0xf
@@ -333,7 +334,7 @@ let load_macho (cputype:int) (reloc_type:int -> 'a) (file:bytes):
       (* Some symbols starting with "ltmp" are auto-generated. They are ignored by
         tools like:
         https://github.com/microsoft/llvm-mctoll/blob/master/MachODump.cpp#L228 *)
-      not (String.starts_with ~prefix:"ltmp" symbol_name)
+      not (starts_with "ltmp" symbol_name)
     then begin
       const_symbols := !const_symbols @ [(symbol_name, n_value(*byte offset *))]
     end) !raw_symbols;
@@ -358,11 +359,11 @@ let load_macho (cputype:int) (reloc_type:int -> 'a) (file:bytes):
       let symname,secofs,seclen = s in
       if start_ofs < seclen then
         let symbol_len = if end_ofs <> None
-          then (Option.get end_ofs - start_ofs)
+          then (option_get end_ofs - start_ofs)
           else seclen - start_ofs in
         Bytes.sub file (secofs + start_ofs) symbol_len
       else
-        let end_ofs = Option.map (fun x -> x - seclen) end_ofs in
+        let end_ofs = option_map (fun x -> x - seclen) end_ofs in
         extract_bytes (start_ofs - seclen) end_ofs sections' in
 
   (* 1. The __text section data *)
@@ -437,28 +438,48 @@ let load_elf_contents_arm path =
   else failwith "Neither ELF nor Mach-O";;
 
 
-let load_elf_x86 = load_elf (62 (* x86-64 *))
-  (function
-  | 2 (* R_X86_64_PC32 *) -> ()
-  | n -> failwith (sprintf "unexpected relocation type: %d" n));;
-
 (* s2n-bignum data structure for representing relocations.
   The full list can be found from
   https://github.com/lattera/glibc/blob/master/elf/elf.h#L2731.
-  Their meanings can be found from 5.7.3. Relocation types in
+
+  For Arm, their meanings can be found from 5.7.3. Relocation types in
   https://github.com/ARM-software/abi-aa/blob/main/aaelf64/aaelf64.rst#5733relocation-operations.
 
-  The naming of these constructors follow those of ELF.
+  For x86, their meanings can be found from
+  https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf.
+
+  The naming of these constructors follow those of ELF, but they are
+  reused for the Mach-O format.
 *)
+
+type x86_reloc =
+  | X86_64_pc32;;
+
 type arm_reloc =
-    | Arm_condbr19 (* conditional branches *)
-    | Arm_call26 (* BL *)
-    | Arm_adr_prel_lo21 (* ADR *)
-    | Arm_adr_prel_pg_hi21 (* ADRP; this is ARM64_RELOC_PAGE21 in Mach-O *)
-    | Arm_add_abs_lo12_nc (* ADD; this is ARM64_RELOC_PAGEOFF12 in Mach-O  *)
+  | Arm_condbr19 (* conditional branches *)
+  | Arm_call26 (* BL *)
+  | Arm_adr_prel_lo21 (* ADR *)
+  | Arm_adr_prel_pg_hi21 (* ADRP; this is ARM64_RELOC_PAGE21 in Mach-O *)
+  | Arm_add_abs_lo12_nc (* ADD; this is ARM64_RELOC_PAGEOFF12 in Mach-O  *);;
 (* Note: there is no ARM64_RELOC_ADDEND in this list! It is immediately
    processed by load_macho. *)
-;;
+
+let load_elf_x86 (bs:bytes) =
+  if is_macho bs then
+      load_macho 0x01000007 (function
+      (* See the full list from:
+        https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm/BinaryFormat/MachO.h *)
+      | 1 (* X86_64_RELOC_SIGNED *) -> X86_64_pc32
+      | n -> failwith (sprintf "unexpected relocation type: %d" n))
+      bs
+  else
+    load_elf (62 (* x86-64 *))
+      (function
+      (* See the full list from:
+         https://refspecs.linuxbase.org/elf/x86_64-abi-0.99.pdf *)
+      | 2 (* R_X86_64_PC32 *) -> X86_64_pc32
+      | n -> failwith (sprintf "unexpected relocation type: %d" n))
+      bs;;
 
 let load_elf_arm (bs:bytes):
     bytes(*.text*) *

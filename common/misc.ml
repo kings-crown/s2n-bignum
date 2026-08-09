@@ -166,11 +166,14 @@ let CONS_TO_APPEND_CONV (t:term) =
   let elems = ref [] in
   let rec strip_cons (t:term):term = begin
     try
-      let the_cons,(itm::tail::[]) = strip_comb t in
-      if name_of the_cons <> "CONS" then failwith "" else
-      elems := itm::!elems;
-      strip_cons tail
-    with _ -> t
+      let the_cons,args = strip_comb t in
+      match args with
+      | [itm; tail] ->
+        if name_of the_cons <> "CONS" then failwith "" else
+        elems := itm::!elems;
+        strip_cons tail
+      | _ -> failwith ""
+    with Failure _ -> t
   end in
   let tail = strip_cons t in
   let new_list = mk_list (rev (!elems), type_of (hd !elems)) in
@@ -1114,16 +1117,6 @@ let MASK_AND_VALUE_FROM_CARRY_LT = prove
   MATCH_MP_TAC MASK_AND_VALUE_FROM_CARRY_REAL_LT THEN ASM_REWRITE_TAC[]);;
 
 (* ------------------------------------------------------------------------- *)
-(* Useful for showing that a call is accessible.                             *)
-(* ------------------------------------------------------------------------- *)
-
-let WORD32_ADD_SUB_OF_LT = prove
- (`!pc tgt. pc <= 2 EXP 31 /\ tgt < 2 EXP 31 ==>
-  word_add (word pc) (word_sx (iword (&tgt - &pc):int32)):int64 = word tgt`,
-  IMP_REWRITE_TAC [word_sx; IVAL_IWORD; WORD_IWORD; GSYM IWORD_INT_ADD;
-    INT_SUB_ADD2; DIMINDEX_32] THEN ARITH_TAC);;
-
-(* ------------------------------------------------------------------------- *)
 (* Transformation for a slightly different way multiplication can be done.   *)
 (* ------------------------------------------------------------------------- *)
 
@@ -1963,16 +1956,28 @@ let MULT_ADD_DIV_LT = prove(
 let COMPUTE_LENGTH_RULE th =
   let ltm = mk_const("LENGTH",
     [hd(snd(dest_type(type_of(lhand(concl th))))),aty]) in
-  CONV_RULE(RAND_CONV LENGTH_CONV) (AP_TERM ltm th);;
+  CONV_RULE(RAND_CONV
+    (REWRITE_CONV [LENGTH_BYTELIST_OF_NUM; LENGTH_BYTELIST_OF_INT;
+        LENGTH; LENGTH_APPEND] THENC NUM_REDUCE_CONV))
+    (AP_TERM ltm th);;
 
 (* ------------------------------------------------------------------------- *)
-(* Normalize (x + m) + n -> x + [m+n] for numerals m and n                   *)
+(* Normalize (x + m) + n -> x + [m+n] for numerals m and n.                  *)
+(* The int variant `&(x + m) + &n -> &x + &[m+n]` is needed for x86 rodata-  *)
+(* aware mc bytelists (rip-relative displacement encodings) so that          *)
+(* BYTELIST_SUBLIST_CONV can match an outer mc evaluated at `pc` against an  *)
+(* inner mc evaluated at `pc + offset`.                                      *)
 (* ------------------------------------------------------------------------- *)
 
 let NORMALIZE_ADD_ADD_CONV =
-  GEN_REWRITE_CONV I [ARITH_RULE
-   `(pc + NUMERAL m) + NUMERAL n = pc + NUMERAL m + NUMERAL n`] THENC
-  RAND_CONV NUM_ADD_CONV;;
+  let nat_pth = ARITH_RULE
+   `(pc + NUMERAL m) + NUMERAL n = pc + NUMERAL m + NUMERAL n`
+  and int_pth = prove
+   (`&(pc + NUMERAL m) + &(NUMERAL n) = &pc + &(NUMERAL m + NUMERAL n):int`,
+    REWRITE_TAC[GSYM INT_OF_NUM_ADD;
+                INT_ARITH `(a + b:int) + c = a + b + c`]) in
+  (GEN_REWRITE_CONV I [nat_pth] THENC RAND_CONV NUM_ADD_CONV) ORELSEC
+  (GEN_REWRITE_CONV I [int_pth] THENC RAND_CONV (RAND_CONV NUM_ADD_CONV));;
 
 (* ------------------------------------------------------------------------- *)
 (* Prove byte list l2 is an initial sublist of l1, as `?r. l1 = APPEND l2 r` *)
@@ -1987,17 +1992,23 @@ let BYTELIST_SUBLIST_CONV =
    (`CONS h t1 = APPEND (CONS h t2) r <=>
       t1:byte list = APPEND t2 r`,
     REWRITE_TAC[APPEND; CONS_11])
+  and pth_largestep = prove
+   (`APPEND h t1 = APPEND (APPEND h t2) r <=>
+      t1:byte list = APPEND t2 r`,
+    REWRITE_TAC[GSYM APPEND_ASSOC;APPEND_LCANCEL])
   and pth_fin = prove
    (`(?r:byte list. l = r) <=> T`,
     MESON_TAC[]) in
   let baseconv = GEN_REWRITE_CONV I [pth_base]
   and stepconv = GEN_REWRITE_CONV I [pth_step]
+  and largestepconv = GEN_REWRITE_CONV I [pth_largestep]
   and simpconv = ONCE_DEPTH_CONV NORMALIZE_ADD_ADD_CONV THENC
                  GEN_REWRITE_CONV ONCE_DEPTH_CONV
                    [ARITH_RULE `n + 0 = n /\ 0 + n = n`]
   and finrule = GEN_REWRITE_RULE RAND_CONV [pth_fin] in
   let simpstep_conv =
     stepconv ORELSEC
+    largestepconv ORELSEC
     (BINOP2_CONV (LAND_CONV simpconv) (LAND_CONV(LAND_CONV simpconv)) THENC
      stepconv) in
   let rec rule th =
@@ -2030,7 +2041,7 @@ let TWEAK_PC_OFFSET_CONV =
 let TWEAK_PC_OFFSET = CONV_RULE(ONCE_DEPTH_CONV TWEAK_PC_OFFSET_CONV);;
 
 (* ------------------------------------------------------------------------- *)
-(* Tactics for using labeled assumtions                                      *)
+(* Tactics for using labeled assumptions                                     *)
 (* ------------------------------------------------------------------------- *)
 
 let UNDISCH_LABEL_TAC (label:string):tactic =
@@ -2104,9 +2115,9 @@ let SAFE_UNIFY_REFL_TAC (allowed_vars_ref:term list ref)
     let used_vars = subtract lhs_vars allowed_vars in
     let used_vars = filter (fun v ->
       let n = name_of v in
-      forall (fun pfx -> not (String.starts_with ~prefix:pfx n))
+      forall (fun pfx -> not (starts_with pfx n))
           allowed_var_prefixes) used_vars in
-    if List.is_empty used_vars then
+    if used_vars = [] then
       UNIFY_REFL_TAC (asl,w)
     else
      (let diff = subtract lhs_vars allowed_vars in
